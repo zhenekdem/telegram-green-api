@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 function ChatWindow({ idInstance, apiTokenInstance, activeChat }) {
     // память для текста нового сообщения, которое пишет пользователь
@@ -24,7 +25,7 @@ function ChatWindow({ idInstance, apiTokenInstance, activeChat }) {
         setMessageText('');
 
         try {
-            const url = `https://green-api.com{idInstance}/sendMessage/${apiTokenInstance}`;
+            const url = `https://green-api.com${idInstance}/sendMessage/${apiTokenInstance}`;
             
             fetch(url, {
                 method: 'POST',
@@ -41,6 +42,52 @@ function ChatWindow({ idInstance, apiTokenInstance, activeChat }) {
             console.log('Сетевой поток обработан');
         }
     }
+     useEffect(() => {
+        if (!idInstance || !apiTokenInstance || !activeChat) return;
+
+        const receiveUrl = `https://green-api.com${idInstance}/receiveNotification/${apiTokenInstance}`;
+
+        const checkIncomingMessages = async () => {
+            try {
+                const response = await fetch(receiveUrl);
+                if (!response.ok) return;
+                
+                const notification = await response.json();
+                
+                // Если на сервере появилось новое сообщение
+                if (notification && notification.receiptId) {
+                    const typeBody = notification.body.typeWebhook;
+                    
+                    // Проверяем, что это именно текстовое сообщение от собеседника
+                    if (typeBody === 'incomingMessageReceived') {
+                        const incomingText = notification.body.messageData?.textMessageData?.textMessage;
+                        const senderId = notification.body.senderData?.chatId;
+
+                        // Если это сообщение пришло именно от того, с кем у нас сейчас открыт чат
+                        if (incomingText && senderId === activeChat.id) {
+                            const newIncomingMsg = {
+                                id: notification.body.idMessage,
+                                text: incomingText,
+                                type: 'incoming' // Серый бабл слева
+                            };
+                            // Дописываем ответ собеседника в историю переписки на экран!
+                            setMessages((prev) => [...prev, newIncomingMsg]);
+                        }
+                    }
+
+                    const deleteUrl = `https://green-api.com${idInstance}/deleteNotification/${apiTokenInstance}/${notification.receiptId}`;
+                    await fetch(deleteUrl, { method: 'DELETE' });
+                }
+            } catch (error) {
+                console.log("Фоновая проверка сообщений...");
+            }
+        };
+
+        const interval = setInterval(checkIncomingMessages, 5000);
+        
+        // Выключаем таймер, если пользователь закроет чат
+        return () => clearInterval(interval);
+    }, [idInstance, apiTokenInstance, activeChat]);
 
     return (
         <div className='chat-window'>
